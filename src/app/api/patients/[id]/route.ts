@@ -36,7 +36,7 @@ export async function GET(req: NextRequest, context: RouteContext) {
     return NextResponse.json({ success: true, data: patient });
   } catch (error) {
     console.error("[Patient] GET error:", error);
-    return NextResponse.json({ success: false, error: "Failed to fetch patient" }, { status: 500 });
+    return NextResponse.json({ success: false, error: "Database not connected" }, { status: 503 });
   }
 }
 

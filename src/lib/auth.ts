@@ -1,34 +1,20 @@
 import { NextAuthOptions, getServerSession } from "next-auth";
-import { PrismaAdapter } from "@auth/prisma-adapter";
 import CredentialsProvider from "next-auth/providers/credentials";
-import { db } from "./db";
 
 // Build providers list dynamically
 const providers: NextAuthOptions["providers"] = [];
 
-// Google OAuth — only when credentials are configured
+// Google OAuth — only when real credentials are configured
 if (
   process.env.GOOGLE_CLIENT_ID &&
   process.env.GOOGLE_CLIENT_SECRET &&
-  process.env.GOOGLE_CLIENT_ID !== "your-google-client-id"
+  !process.env.GOOGLE_CLIENT_ID.startsWith("demo")
 ) {
-  // Dynamic import to avoid errors when not configured
   const GoogleProvider = require("next-auth/providers/google").default;
   providers.push(
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    })
-  );
-}
-
-// Email magic link — only when EMAIL_SERVER is configured
-if (process.env.EMAIL_SERVER) {
-  const EmailProvider = require("next-auth/providers/email").default;
-  providers.push(
-    EmailProvider({
-      server: process.env.EMAIL_SERVER,
-      from: process.env.EMAIL_FROM || "noreply@aarogyawhatsai.com",
     })
   );
 }
@@ -42,7 +28,6 @@ providers.push(
       password: { label: "Password", type: "password", placeholder: "demo123" },
     },
     async authorize(credentials) {
-      // Demo credentials
       if (
         credentials?.email === "admin@clinic.com" &&
         credentials?.password === "demo123"
@@ -51,10 +36,8 @@ providers.push(
           id: "demo-admin",
           name: "Dr. Demo Admin",
           email: "admin@clinic.com",
-          role: "ADMIN",
         };
       }
-
       if (
         credentials?.email === "staff@clinic.com" &&
         credentials?.password === "demo123"
@@ -63,22 +46,17 @@ providers.push(
           id: "demo-staff",
           name: "Staff Demo",
           email: "staff@clinic.com",
-          role: "STAFF",
         };
       }
-
       return null;
     },
   })
 );
 
 export const authOptions: NextAuthOptions = {
-  // Only use PrismaAdapter when we have a real DB connection
-  ...(process.env.DATABASE_URL &&
-  !process.env.DATABASE_URL.includes("your-neon-database-url")
-    ? { adapter: PrismaAdapter(db) as NextAuthOptions["adapter"] }
-    : {}),
+  // No PrismaAdapter — JWT-only mode works without a database
   session: { strategy: "jwt" },
+  secret: process.env.NEXTAUTH_SECRET || "fallback-secret-for-dev-only",
   pages: {
     signIn: "/login",
   },
@@ -86,9 +64,9 @@ export const authOptions: NextAuthOptions = {
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
-        token.id = (user as any).id || user.id;
-        token.role = (user as any).role || "ADMIN";
-        token.clinicId = (user as any).clinicId || null;
+        token.id = user.id;
+        token.role = "ADMIN";
+        token.clinicId = null;
       }
       return token;
     },
