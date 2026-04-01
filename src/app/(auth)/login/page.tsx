@@ -5,17 +5,32 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Heart } from "lucide-react";
+import { Heart, LogIn } from "lucide-react";
 
 export default function LoginPage() {
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState("admin@clinic.com");
+  const [password, setPassword] = useState("demo123");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
-  const handleEmailLogin = async (e: React.FormEvent) => {
+  const handleDemoLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    await signIn("email", { email, callbackUrl: "/dashboard" });
-    setLoading(false);
+    setError("");
+
+    const result = await signIn("credentials", {
+      email,
+      password,
+      callbackUrl: "/dashboard",
+      redirect: false,
+    });
+
+    if (result?.error) {
+      setError("Invalid email or password");
+      setLoading(false);
+    } else if (result?.url) {
+      window.location.href = result.url;
+    }
   };
 
   return (
@@ -29,6 +44,55 @@ export default function LoginPage() {
           <CardDescription>Sign in to manage your clinic&apos;s WhatsApp automation</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* Demo Login Form */}
+          <form onSubmit={handleDemoLogin} className="space-y-3">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-700">Email</label>
+              <Input
+                type="email"
+                placeholder="admin@clinic.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-700">Password</label>
+              <Input
+                type="password"
+                placeholder="Enter password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+            </div>
+
+            {error && (
+              <p className="text-sm text-red-500 text-center">{error}</p>
+            )}
+
+            <Button type="submit" variant="whatsapp" className="w-full h-11" disabled={loading}>
+              <LogIn className="w-4 h-4 mr-2" />
+              {loading ? "Signing in..." : "Sign In"}
+            </Button>
+          </form>
+
+          {/* Demo credentials hint */}
+          <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+            <p className="text-xs font-semibold text-green-800 mb-1">Demo Credentials:</p>
+            <p className="text-xs text-green-700">Admin: admin@clinic.com / demo123</p>
+            <p className="text-xs text-green-700">Staff: staff@clinic.com / demo123</p>
+          </div>
+
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-white px-2 text-muted-foreground">Or</span>
+            </div>
+          </div>
+
           {/* Google Sign In */}
           <Button
             variant="outline"
@@ -55,29 +119,6 @@ export default function LoginPage() {
             </svg>
             Continue with Google
           </Button>
-
-          <div className="relative">
-            <div className="absolute inset-0 flex items-center">
-              <span className="w-full border-t" />
-            </div>
-            <div className="relative flex justify-center text-xs uppercase">
-              <span className="bg-white px-2 text-muted-foreground">Or continue with email</span>
-            </div>
-          </div>
-
-          {/* Email Sign In */}
-          <form onSubmit={handleEmailLogin} className="space-y-3">
-            <Input
-              type="email"
-              placeholder="doctor@clinic.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-            />
-            <Button type="submit" variant="whatsapp" className="w-full" disabled={loading}>
-              {loading ? "Sending link..." : "Send Magic Link"}
-            </Button>
-          </form>
 
           <p className="text-xs text-center text-gray-500 mt-4">
             By signing in, you agree to our Terms of Service and Privacy Policy
