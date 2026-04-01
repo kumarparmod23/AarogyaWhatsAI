@@ -1,0 +1,358 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── NextAuth Models ─────────────────────────────────────────
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ─── User (Doctor / Admin / Staff) ───────────────────────────
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  role          UserRole  @default(DOCTOR)
+  clinicId      String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts Account[]
+  sessions Session[]
+  clinic   Clinic?    @relation(fields: [clinicId], references: [id])
+  messages Message[]  @relation("SentByUser")
+}
+
+enum UserRole {
+  ADMIN
+  DOCTOR
+  STAFF
+}
+
+// ─── Clinic ──────────────────────────────────────────────────
+
+model Clinic {
+  id        String   @id @default(cuid())
+  name      String
+  phone     String?
+  address   String?
+  city      String?
+  state     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users      User[]
+  patients   Patient[]
+  campaigns  Campaign[]
+  templates  MessageTemplate[]
+}
+
+// ─── Patient (Lead) ──────────────────────────────────────────
+
+model Patient {
+  id                String        @id @default(cuid())
+  phone             String        @unique
+  name              String?
+  age               Int?
+  gender            Gender?
+  email             String?
+  city              String?
+  language          Language      @default(HINDI)
+  leadStatus        LeadStatus    @default(NEW)
+  leadScore         Int           @default(0)
+  tags              String[]      @default([])
+  medicalNotes      String?       @db.Text
+  lastConversation  String?       @db.Text
+  consentGiven      Boolean       @default(false)
+  consentTimestamp   DateTime?
+  clinicId          String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  clinic            Clinic?       @relation(fields: [clinicId], references: [id])
+  conversations     Conversation[]
+  appointments      Appointment[]
+  followUps         FollowUp[]
+  feedbacks         Feedback[]
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum Language {
+  HINDI
+  ENGLISH
+  HINGLISH
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  HOT
+  APPOINTMENT_BOOKED
+  VISITED
+  FOLLOW_UP
+  CONVERTED
+  LOST
+}
+
+// ─── Conversation & Messages ─────────────────────────────────
+
+model Conversation {
+  id              String             @id @default(cuid())
+  patientId       String
+  status          ConversationStatus @default(AI_HANDLING)
+  flowType        FlowType?
+  aiSummary       String?            @db.Text
+  sessionExpiry   DateTime?          // 24-hour WhatsApp session window
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  patient  Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  messages Message[]
+
+  @@index([patientId])
+}
+
+enum ConversationStatus {
+  AI_HANDLING
+  HUMAN_TAKEOVER
+  CLOSED
+}
+
+enum FlowType {
+  LEAD_QUALIFICATION
+  APPOINTMENT_BOOKING
+  PRE_APPOINTMENT_REMINDER
+  POST_TREATMENT_DAY1
+  POST_TREATMENT_DAY3
+  POST_TREATMENT_DAY7
+  POST_TREATMENT_DAY30
+  FEEDBACK_COLLECTION
+  GENERAL_QUERY
+}
+
+model Message {
+  id              String        @id @default(cuid())
+  conversationId  String
+  direction       MessageDir
+  sender          MessageSender
+  content         String        @db.Text
+  messageType     MessageType   @default(TEXT)
+  mediaUrl        String?
+  whatsappMsgId   String?       @unique
+  templateName    String?
+  status          MessageStatus @default(SENT)
+  sentById        String?
+  createdAt       DateTime      @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sentBy       User?        @relation("SentByUser", fields: [sentById], references: [id])
+
+  @@index([conversationId])
+  @@index([whatsappMsgId])
+}
+
+enum MessageDir {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageSender {
+  PATIENT
+  AI
+  HUMAN
+  SYSTEM
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  DOCUMENT
+  LOCATION
+  TEMPLATE
+  INTERACTIVE
+}
+
+enum MessageStatus {
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+// ─── Appointment ─────────────────────────────────────────────
+
+model Appointment {
+  id          String            @id @default(cuid())
+  patientId   String
+  dateTime    DateTime
+  duration    Int               @default(30) // minutes
+  type        String?
+  notes       String?           @db.Text
+  status      AppointmentStatus @default(SCHEDULED)
+  reminderSent Boolean          @default(false)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId])
+  @@index([dateTime])
+}
+
+enum AppointmentStatus {
+  SCHEDULED
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+// ─── Follow-up Schedule ──────────────────────────────────────
+
+model FollowUp {
+  id          String         @id @default(cuid())
+  patientId   String
+  type        FlowType
+  scheduledAt DateTime
+  completedAt DateTime?
+  status      FollowUpStatus @default(PENDING)
+  jobId       String?        // BullMQ job reference
+  createdAt   DateTime       @default(now())
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([scheduledAt])
+  @@index([status])
+}
+
+enum FollowUpStatus {
+  PENDING
+  SENT
+  RESPONDED
+  SKIPPED
+}
+
+// ─── Feedback ────────────────────────────────────────────────
+
+model Feedback {
+  id         String   @id @default(cuid())
+  patientId  String
+  npsScore   Int?     // 0-10
+  comment    String?  @db.Text
+  category   String?
+  createdAt  DateTime @default(now())
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+}
+
+// ─── Campaign (Bulk Messages) ────────────────────────────────
+
+model Campaign {
+  id             String         @id @default(cuid())
+  name           String
+  clinicId       String
+  templateName   String?
+  targetFilter   Json?          // filter criteria for patients
+  scheduledAt    DateTime?
+  status         CampaignStatus @default(DRAFT)
+  totalTargets   Int            @default(0)
+  sent           Int            @default(0)
+  delivered      Int            @default(0)
+  read           Int            @default(0)
+  failed         Int            @default(0)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  clinic Clinic @relation(fields: [clinicId], references: [id])
+
+  @@index([clinicId])
+}
+
+enum CampaignStatus {
+  DRAFT
+  SCHEDULED
+  SENDING
+  COMPLETED
+  CANCELLED
+}
+
+// ─── WhatsApp Message Templates ──────────────────────────────
+
+model MessageTemplate {
+  id        String         @id @default(cuid())
+  clinicId  String
+  name      String
+  language  String         @default("hi")
+  category  TemplateCategory
+  header    String?
+  body      String         @db.Text
+  footer    String?
+  buttons   Json?
+  status    TemplateStatus @default(DRAFT)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  clinic Clinic @relation(fields: [clinicId], references: [id])
+
+  @@unique([clinicId, name])
+}
+
+enum TemplateCategory {
+  MARKETING
+  UTILITY
+  AUTHENTICATION
+}
+
+enum TemplateStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  REJECTED
+}
