@@ -1,11 +1,9 @@
 import { Worker } from "bullmq";
-import IORedis from "ioredis";
 import { PrismaClient } from "@prisma/client";
 import { sendTemplateMessage, sendTextMessage } from "../whatsapp";
+import { getConnection } from "./jobs";
 
-const connection = new IORedis(process.env.REDIS_URL || "redis://localhost:6379", {
-  maxRetriesPerRequest: null,
-});
+const connection = getConnection();
 
 const db = new PrismaClient();
 
