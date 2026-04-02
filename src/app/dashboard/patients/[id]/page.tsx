@@ -1,210 +1,108 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
+import { store, Patient, Message, Appointment } from "@/lib/store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { formatPhone, getLeadStatusColor, getLeadStatusLabel } from "@/lib/utils";
-import { Phone, Mail, MapPin, Calendar, MessageSquare, ArrowLeft } from "lucide-react";
-import Link from "next/link";
+import { Input } from "@/components/ui/input";
+import { ArrowLeft, Save, MessageSquare, Calendar } from "lucide-react";
+import { toast } from "sonner";
 
 export default function PatientDetailPage() {
   const params = useParams();
-  const [patient, setPatient] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const router = useRouter();
+  const id = params.id as string;
+  const [patient, setPatient] = useState<Patient | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState<Partial<Patient>>({});
 
   useEffect(() => {
-    async function load() {
-      try {
-        const res = await fetch(`/api/patients/${params.id}`);
-        const data = await res.json();
-        if (data.success) setPatient(data.data);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    }
-    load();
-  }, [params.id]);
+    const p = store.getPatient(id);
+    if (p) { setPatient(p); setForm(p); }
+    setMessages(store.getMessages(id));
+    setAppointments(store.getAppointments(id));
+  }, [id]);
 
-  if (loading) {
-    return (
-      <div className="flex justify-center py-20">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-whatsapp" />
-      </div>
-    );
-  }
+  if (!patient) return <div className="p-6 text-center text-gray-500">Patient not found</div>;
 
-  if (!patient) {
-    return <div className="text-center py-20 text-gray-500">Patient not found</div>;
-  }
+  const handleSave = () => {
+    store.updatePatient(id, form);
+    setPatient(store.getPatient(id) || null);
+    setEditing(false);
+    toast.success("Patient updated!");
+  };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <Link href="/dashboard/patients">
-          <Button variant="ghost" size="icon">
-            <ArrowLeft className="h-4 w-4" />
+    <div className="space-y-4">
+      <Button variant="ghost" onClick={() => router.back()}><ArrowLeft className="w-4 h-4 mr-1" /> Back</Button>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle>{patient.name || patient.phone}</CardTitle>
+          <Button variant={editing ? "whatsapp" : "outline"} size="sm" onClick={editing ? handleSave : () => setEditing(true)}>
+            {editing ? <><Save className="w-4 h-4 mr-1" /> Save</> : "Edit"}
           </Button>
-        </Link>
-        <h1 className="text-2xl font-bold">Patient Details</h1>
-      </div>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            {[
+              { label: "Name", key: "name" },
+              { label: "Phone", key: "phone" },
+              { label: "Age", key: "age" },
+              { label: "Gender", key: "gender" },
+              { label: "City", key: "city" },
+              { label: "Lead Status", key: "leadStatus" },
+            ].map((f) => (
+              <div key={f.key}>
+                <label className="text-xs text-gray-500">{f.label}</label>
+                {editing ? (
+                  <Input value={(form as any)[f.key] || ""} onChange={(e) => setForm({ ...form, [f.key]: e.target.value })} />
+                ) : (
+                  <p className="font-medium">{(patient as any)[f.key] || "—"}</p>
+                )}
+              </div>
+            ))}
+          </div>
+          {editing && (
+            <div className="mt-4">
+              <label className="text-xs text-gray-500">Medical Notes</label>
+              <textarea className="w-full border rounded p-2 text-sm mt-1" rows={3} value={form.medicalNotes || ""} onChange={(e) => setForm({ ...form, medicalNotes: e.target.value })} />
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
-      <div className="grid lg:grid-cols-3 gap-6">
-        {/* Profile Card */}
+      <div className="grid md:grid-cols-2 gap-4">
         <Card>
-          <CardContent className="pt-6">
-            <div className="flex flex-col items-center text-center">
-              <Avatar className="h-16 w-16 mb-3">
-                <AvatarFallback className="bg-whatsapp/10 text-whatsapp-dark text-xl">
-                  {patient.name?.charAt(0)?.toUpperCase() || "?"}
-                </AvatarFallback>
-              </Avatar>
-              <h2 className="text-lg font-bold">{patient.name || "Unknown"}</h2>
-              <span className={`text-xs px-2.5 py-0.5 rounded-full mt-1 ${getLeadStatusColor(patient.leadStatus)}`}>
-                {getLeadStatusLabel(patient.leadStatus)}
-              </span>
-            </div>
-
-            <div className="mt-6 space-y-3">
-              <div className="flex items-center gap-3 text-sm">
-                <Phone className="h-4 w-4 text-gray-400" />
-                <span>{formatPhone(patient.phone)}</span>
-              </div>
-              {patient.email && (
-                <div className="flex items-center gap-3 text-sm">
-                  <Mail className="h-4 w-4 text-gray-400" />
-                  <span>{patient.email}</span>
+          <CardHeader><CardTitle className="text-base flex items-center gap-2"><MessageSquare className="w-4 h-4" /> Messages ({messages.length})</CardTitle></CardHeader>
+          <CardContent className="max-h-80 overflow-y-auto">
+            {messages.length === 0 ? <p className="text-gray-500 text-sm">No messages yet</p> :
+              messages.slice(-20).map((m) => (
+                <div key={m.id} className={`mb-2 p-2 rounded text-sm ${m.direction === "INBOUND" ? "bg-gray-100" : "bg-green-50"}`}>
+                  <span className="text-xs text-gray-500">{m.sender} • {new Date(m.createdAt).toLocaleTimeString()}</span>
+                  <p>{m.content}</p>
                 </div>
-              )}
-              {patient.city && (
-                <div className="flex items-center gap-3 text-sm">
-                  <MapPin className="h-4 w-4 text-gray-400" />
-                  <span>{patient.city}</span>
-                </div>
-              )}
-              <div className="flex items-center gap-3 text-sm">
-                <Calendar className="h-4 w-4 text-gray-400" />
-                <span>Joined {new Date(patient.createdAt).toLocaleDateString("hi-IN")}</span>
-              </div>
-            </div>
-
-            <div className="mt-6 flex flex-wrap gap-1">
-              {patient.age && <Badge variant="outline">Age: {patient.age}</Badge>}
-              {patient.gender && <Badge variant="outline">{patient.gender}</Badge>}
-              <Badge variant="outline">{patient.language}</Badge>
-              {patient.consentGiven && <Badge className="bg-green-100 text-green-800">Consent Given</Badge>}
-            </div>
-
-            <div className="mt-6">
-              <Link href={`/dashboard/inbox?patient=${patient.id}`}>
-                <Button variant="whatsapp" className="w-full">
-                  <MessageSquare className="h-4 w-4 mr-2" /> Open Chat
-                </Button>
-              </Link>
-            </div>
+              ))
+            }
           </CardContent>
         </Card>
 
-        {/* Details Tabs */}
-        <div className="lg:col-span-2">
-          <Tabs defaultValue="notes">
-            <TabsList>
-              <TabsTrigger value="notes">Medical Notes</TabsTrigger>
-              <TabsTrigger value="conversations">Conversations</TabsTrigger>
-              <TabsTrigger value="appointments">Appointments</TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="notes">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg">Medical Notes</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-sm text-gray-600 whitespace-pre-wrap">
-                    {patient.medicalNotes || "No medical notes recorded yet."}
-                  </p>
-                  {patient.lastConversation && (
-                    <div className="mt-4 p-3 bg-blue-50 rounded-lg">
-                      <h4 className="text-sm font-medium text-blue-800 mb-1">AI Summary</h4>
-                      <p className="text-sm text-blue-700">{patient.lastConversation}</p>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </TabsContent>
-
-            <TabsContent value="conversations">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg">Conversation History</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {patient.conversations?.length > 0 ? (
-                    <div className="space-y-3">
-                      {patient.conversations.map((conv: any) => (
-                        <div key={conv.id} className="p-3 border rounded-lg">
-                          <div className="flex items-center justify-between mb-1">
-                            <Badge variant="outline">{conv.flowType || "General"}</Badge>
-                            <span className="text-xs text-gray-500">
-                              {new Date(conv.createdAt).toLocaleDateString()}
-                            </span>
-                          </div>
-                          <p className="text-sm text-gray-600 mt-1">{conv.aiSummary || `${conv._count?.messages || 0} messages`}</p>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-gray-500">No conversations yet</p>
-                  )}
-                </CardContent>
-              </Card>
-            </TabsContent>
-
-            <TabsContent value="appointments">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg">Appointments</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {patient.appointments?.length > 0 ? (
-                    <div className="space-y-3">
-                      {patient.appointments.map((apt: any) => (
-                        <div key={apt.id} className="p-3 border rounded-lg flex items-center justify-between">
-                          <div>
-                            <p className="text-sm font-medium">
-                              {new Date(apt.dateTime).toLocaleDateString("hi-IN", {
-                                weekday: "long",
-                                day: "numeric",
-                                month: "long",
-                              })}
-                            </p>
-                            <p className="text-xs text-gray-500">
-                              {new Date(apt.dateTime).toLocaleTimeString("hi-IN", {
-                                hour: "2-digit",
-                                minute: "2-digit",
-                              })}
-                              {apt.type ? ` - ${apt.type}` : ""}
-                            </p>
-                          </div>
-                          <Badge variant={apt.status === "COMPLETED" ? "default" : "outline"}>
-                            {apt.status}
-                          </Badge>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-gray-500">No appointments scheduled</p>
-                  )}
-                </CardContent>
-              </Card>
-            </TabsContent>
-          </Tabs>
-        </div>
+        <Card>
+          <CardHeader><CardTitle className="text-base flex items-center gap-2"><Calendar className="w-4 h-4" /> Appointments ({appointments.length})</CardTitle></CardHeader>
+          <CardContent className="max-h-80 overflow-y-auto">
+            {appointments.length === 0 ? <p className="text-gray-500 text-sm">No appointments</p> :
+              appointments.map((a) => (
+                <div key={a.id} className="mb-2 p-2 bg-gray-50 rounded text-sm">
+                  <p className="font-medium">{new Date(a.dateTime).toLocaleString()}</p>
+                  <p className="text-gray-500">{a.type || "General"} • {a.status}</p>
+                </div>
+              ))
+            }
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

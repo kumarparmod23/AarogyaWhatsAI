@@ -1,125 +1,91 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { StatsCards } from "@/components/dashboard/stats-cards";
+import { useState, useEffect } from "react";
+import Link from "next/link";
+import { store } from "@/lib/store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { formatPhone, timeAgo, getLeadStatusColor } from "@/lib/utils";
-import type { DashboardStats } from "@/types";
+import { Button } from "@/components/ui/button";
+import { Users, MessageSquare, Calendar, TrendingUp, Send, UserPlus, Download, BarChart3, Heart, ArrowRight } from "lucide-react";
 
 export default function DashboardPage() {
-  const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [recentPatients, setRecentPatients] = useState<any[]>([]);
+  const [stats, setStats] = useState<any>(null);
+  const [patients, setPatients] = useState<any[]>([]);
+  const [clinic, setClinic] = useState<any>(null);
 
   useEffect(() => {
-    fetch("/api/analytics")
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.success) setStats(d.data);
-      })
-      .catch(() => {});
-
-    fetch("/api/patients?take=5")
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.success) setRecentPatients(d.data);
-      })
-      .catch(() => {});
+    setStats(store.getAnalytics());
+    setPatients(store.getPatients().slice(0, 5));
+    setClinic(store.getClinic());
   }, []);
 
-  const defaultStats: DashboardStats = {
-    totalPatients: 0,
-    newLeadsToday: 0,
-    appointmentsToday: 0,
-    activeConversations: 0,
-    responseRate: 0,
-    bookingRate: 0,
-    avgNpsScore: 0,
-    noShowRate: 0,
-  };
+  if (!stats) return <div className="p-6 text-center">Loading...</div>;
+
+  const statCards = [
+    { label: "Total Patients", value: stats.totalPatients, icon: Users, color: "text-blue-600", bg: "bg-blue-50" },
+    { label: "New Today", value: stats.newLeadsToday, icon: UserPlus, color: "text-green-600", bg: "bg-green-50" },
+    { label: "Appointments Today", value: stats.appointmentsToday, icon: Calendar, color: "text-purple-600", bg: "bg-purple-50" },
+    { label: "Active Chats", value: stats.activeConversations, icon: MessageSquare, color: "text-orange-600", bg: "bg-orange-50" },
+    { label: "Response Rate", value: `${stats.responseRate}%`, icon: TrendingUp, color: "text-teal-600", bg: "bg-teal-50" },
+    { label: "Booking Rate", value: `${stats.bookingRate}%`, icon: BarChart3, color: "text-indigo-600", bg: "bg-indigo-50" },
+    { label: "Avg NPS", value: stats.avgNpsScore || "N/A", icon: Heart, color: "text-pink-600", bg: "bg-pink-50" },
+    { label: "Total Messages", value: stats.totalMessages, icon: Send, color: "text-cyan-600", bg: "bg-cyan-50" },
+  ];
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Dashboard</h1>
-        <p className="text-sm text-gray-500 mt-1">Overview of your clinic&apos;s WhatsApp automation</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Dashboard</h1>
+          <p className="text-gray-500">{clinic?.clinicName || "Your Clinic"}</p>
+        </div>
+        <div className="flex gap-2">
+          <Link href="/dashboard/patients"><Button variant="outline" size="sm"><UserPlus className="w-4 h-4 mr-1" /> Add Patient</Button></Link>
+          <Link href="/dashboard/broadcast"><Button variant="whatsapp" size="sm"><Send className="w-4 h-4 mr-1" /> Broadcast</Button></Link>
+        </div>
       </div>
 
-      <StatsCards stats={stats || defaultStats} />
-
-      <div className="grid lg:grid-cols-2 gap-6">
-        {/* Recent Patients */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Recent Patients</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {recentPatients.length === 0 ? (
-              <p className="text-sm text-gray-500 text-center py-4">
-                No patients yet. They&apos;ll appear when they message your WhatsApp number.
-              </p>
-            ) : (
-              <div className="space-y-3">
-                {recentPatients.map((p: any) => (
-                  <div key={p.id} className="flex items-center gap-3">
-                    <Avatar className="h-9 w-9">
-                      <AvatarFallback className="bg-whatsapp/10 text-whatsapp-dark text-sm">
-                        {p.name?.charAt(0)?.toUpperCase() || "?"}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{p.name || "Unknown"}</p>
-                      <p className="text-xs text-gray-500">{formatPhone(p.phone)}</p>
-                    </div>
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${getLeadStatusColor(p.leadStatus)}`}>
-                      {p.leadStatus}
-                    </span>
-                    <span className="text-xs text-gray-400">{timeAgo(p.createdAt)}</span>
-                  </div>
-                ))}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {statCards.map((s) => (
+          <Card key={s.label}>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-gray-500">{s.label}</p>
+                  <p className="text-2xl font-bold mt-1">{s.value}</p>
+                </div>
+                <div className={`w-10 h-10 rounded-lg ${s.bg} flex items-center justify-center`}>
+                  <s.icon className={`w-5 h-5 ${s.color}`} />
+                </div>
               </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Quick Actions */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Quick Actions</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <a
-              href="/dashboard/inbox"
-              className="block p-3 rounded-lg border hover:bg-gray-50 transition-colors"
-            >
-              <p className="font-medium text-sm">Open Inbox</p>
-              <p className="text-xs text-gray-500">View and respond to patient messages</p>
-            </a>
-            <a
-              href="/dashboard/campaigns"
-              className="block p-3 rounded-lg border hover:bg-gray-50 transition-colors"
-            >
-              <p className="font-medium text-sm">Create Campaign</p>
-              <p className="text-xs text-gray-500">Send bulk reminders or follow-ups</p>
-            </a>
-            <a
-              href="/dashboard/patients"
-              className="block p-3 rounded-lg border hover:bg-gray-50 transition-colors"
-            >
-              <p className="font-medium text-sm">View All Patients</p>
-              <p className="text-xs text-gray-500">Search and filter your patient database</p>
-            </a>
-            <a
-              href="/dashboard/analytics"
-              className="block p-3 rounded-lg border hover:bg-gray-50 transition-colors"
-            >
-              <p className="font-medium text-sm">View Analytics</p>
-              <p className="text-xs text-gray-500">Check performance metrics and trends</p>
-            </a>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        ))}
       </div>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-lg">Recent Patients</CardTitle>
+          <Link href="/dashboard/patients"><Button variant="ghost" size="sm">View All <ArrowRight className="w-4 h-4 ml-1" /></Button></Link>
+        </CardHeader>
+        <CardContent>
+          {patients.length === 0 ? (
+            <div className="text-center py-8 text-gray-500">
+              <Users className="w-12 h-12 mx-auto mb-2 opacity-30" />
+              <p>No patients yet.</p>
+              <Link href="/dashboard/patients"><Button variant="whatsapp" size="sm" className="mt-3"><UserPlus className="w-4 h-4 mr-1" /> Add Patient</Button></Link>
+            </div>
+          ) : (
+            <div className="divide-y">
+              {patients.map((p) => (
+                <Link key={p.id} href={`/dashboard/patients/${p.id}`} className="py-3 flex items-center justify-between hover:bg-gray-50 px-2 rounded cursor-pointer block">
+                  <div><p className="font-medium">{p.name || "Unknown"}</p><p className="text-sm text-gray-500">{p.phone}</p></div>
+                  <span className={`text-xs px-2 py-1 rounded-full ${p.leadStatus === "NEW" ? "bg-blue-100 text-blue-700" : p.leadStatus === "CONVERTED" ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-700"}`}>{p.leadStatus}</span>
+                </Link>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

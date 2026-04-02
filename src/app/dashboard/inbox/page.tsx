@@ -1,144 +1,192 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { ChatSidebar } from "@/components/chat/chat-sidebar";
-import { ChatWindow } from "@/components/chat/chat-window";
-import { MessageSquare } from "lucide-react";
-import type { ChatConversation, ChatMessage } from "@/types";
+import { useState, useEffect, useRef } from "react";
+import { store, Patient, Message } from "@/lib/store";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Send, Bot, User, ArrowLeft } from "lucide-react";
+import { toast } from "sonner";
 
 export default function InboxPage() {
-  const [conversations, setConversations] = useState<ChatConversation[]>([]);
+  const [patients, setPatients] = useState<Patient[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState("");
+  const [sending, setSending] = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
 
-  // Load conversations
   useEffect(() => {
-    async function loadConversations() {
-      try {
-        const res = await fetch("/api/messages");
-        const data = await res.json();
-        if (data.success) {
-          setConversations(data.data);
-        }
-      } catch (err) {
-        console.error("Failed to load conversations:", err);
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    loadConversations();
-    // Poll for new messages every 5 seconds
-    const interval = setInterval(loadConversations, 5000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // Load messages when conversation selected
-  const loadMessages = useCallback(async (conversationId: string) => {
-    try {
-      const res = await fetch(`/api/messages?conversationId=${conversationId}`);
-      const data = await res.json();
-      if (data.success) {
-        setMessages(data.data);
-      }
-    } catch (err) {
-      console.error("Failed to load messages:", err);
-    }
+    const allMsgs = store.getMessages();
+    const patientIds = [...new Set(allMsgs.map((m) => m.patientId))];
+    const allPatients = store.getPatients();
+    const withMsgs = allPatients.filter((p) => patientIds.includes(p.id));
+    const withoutMsgs = allPatients.filter((p) => !patientIds.includes(p.id));
+    setPatients([...withMsgs, ...withoutMsgs]);
   }, []);
 
   useEffect(() => {
     if (selectedId) {
-      loadMessages(selectedId);
-      const interval = setInterval(() => loadMessages(selectedId), 3000);
-      return () => clearInterval(interval);
+      setMessages(store.getMessages(selectedId));
+      setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
     }
-  }, [selectedId, loadMessages]);
+  }, [selectedId]);
 
-  const selectedConv = conversations.find((c) => c.id === selectedId);
+  const selectedPatient = patients.find((p) => p.id === selectedId);
 
-  // Send a manual message
-  const handleSendMessage = async (text: string) => {
-    if (!selectedId || !selectedConv) return;
+  const sendMessage = async () => {
+    if (!input.trim() || !selectedPatient) return;
+    setSending(true);
+    const content = input.trim();
+    setInput("");
+
+    // Save outbound message locally
+    store.addMessage({
+      patientId: selectedPatient.id,
+      direction: "OUTBOUND",
+      sender: "HUMAN",
+      content,
+      messageType: "TEXT",
+      status: "SENDING",
+    });
+    setMessages(store.getMessages(selectedPatient.id));
+
+    // Send via WhatsApp API
+    const keys = store.getApiKeys();
+    if (keys.whatsappAccessToken && keys.whatsappPhoneNumberId) {
+      try {
+        const res = await fetch("/api/whatsapp/send", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-wa-token": keys.whatsappAccessToken,
+            "x-wa-phone-id": keys.whatsappPhoneNumberId,
+          },
+          body: JSON.stringify({ phone: selectedPatient.phone, message: content }),
+        });
+        const data = await res.json();
+        if (data.success) toast.success("Message sent via WhatsApp");
+        else toast.error(data.error || "Failed to send");
+      } catch { toast.error("Network error"); }
+    } else {
+      toast.info("Message saved locally (WhatsApp API not configured)");
+    }
+    setSending(false);
+  };
+
+  const sendAiReply = async () => {
+    if (!selectedPatient) return;
+    setSending(true);
+    const keys = store.getApiKeys();
+    const clinic = store.getClinic();
+    const recentMsgs = messages.slice(-10).map((m) => ({
+      role: m.direction === "INBOUND" ? "user" : "assistant",
+      content: m.content,
+    }));
+
+    if (!keys.aiApiKey) { toast.error("AI API key not configured. Go to Settings."); setSending(false); return; }
 
     try {
-      await fetch("/api/messages/send", {
+      const res = await fetch("/api/ai/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-ai-provider": keys.aiProvider,
+          "x-ai-key": keys.aiApiKey,
+        },
         body: JSON.stringify({
-          conversationId: selectedId,
-          phone: selectedConv.patient.phone,
-          content: text,
+          messages: recentMsgs,
+          patientName: selectedPatient.name,
+          clinicName: clinic.clinicName,
+          doctorName: clinic.doctorName,
+          specialization: clinic.specialization,
         }),
       });
-      loadMessages(selectedId);
-    } catch (err) {
-      console.error("Failed to send message:", err);
-    }
-  };
+      const data = await res.json();
+      if (data.success) {
+        const aiMsg = data.data.response;
+        store.addMessage({
+          patientId: selectedPatient.id,
+          direction: "OUTBOUND",
+          sender: "AI",
+          content: aiMsg,
+          messageType: "TEXT",
+          status: "SENT",
+        });
+        setMessages(store.getMessages(selectedPatient.id));
 
-  // Takeover / handback
-  const handleTakeover = async () => {
-    if (!selectedId) return;
-    await fetch(`/api/messages/send`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ conversationId: selectedId, status: "HUMAN_TAKEOVER" }),
-    });
-    loadMessages(selectedId);
+        // Also send via WhatsApp if configured
+        if (keys.whatsappAccessToken && keys.whatsappPhoneNumberId) {
+          await fetch("/api/whatsapp/send", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-wa-token": keys.whatsappAccessToken, "x-wa-phone-id": keys.whatsappPhoneNumberId },
+            body: JSON.stringify({ phone: selectedPatient.phone, message: aiMsg }),
+          });
+        }
+        toast.success("AI response sent");
+      } else { toast.error(data.error); }
+    } catch { toast.error("AI request failed"); }
+    setSending(false);
   };
-
-  const handleHandbackToAI = async () => {
-    if (!selectedId) return;
-    await fetch(`/api/messages/send`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ conversationId: selectedId, status: "AI_HANDLING" }),
-    });
-    loadMessages(selectedId);
-  };
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-[calc(100vh-8rem)]">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-whatsapp" />
-      </div>
-    );
-  }
 
   return (
-    <div className="h-[calc(100vh-8rem)] flex rounded-lg border bg-white overflow-hidden -m-4 md:-m-6">
-      {/* Conversation sidebar — hide on mobile when chat is open */}
-      <div className={selectedId ? "hidden md:flex" : "flex w-full md:w-auto"}>
-        <ChatSidebar
-          conversations={conversations}
-          selectedId={selectedId}
-          onSelect={setSelectedId}
-        />
+    <div className="flex h-[calc(100vh-7rem)] gap-4">
+      {/* Sidebar */}
+      <div className={`${selectedId ? "hidden md:block" : ""} w-full md:w-80 border rounded-lg bg-white overflow-y-auto`}>
+        <div className="p-3 border-b font-semibold text-gray-700">Patients ({patients.length})</div>
+        {patients.length === 0 ? (
+          <p className="p-4 text-sm text-gray-500">No patients. Add patients first.</p>
+        ) : patients.map((p) => {
+          const lastMsg = store.getMessages(p.id).slice(-1)[0];
+          return (
+            <div key={p.id} onClick={() => setSelectedId(p.id)}
+              className={`p-3 border-b cursor-pointer hover:bg-gray-50 ${selectedId === p.id ? "bg-green-50" : ""}`}>
+              <p className="font-medium text-sm">{p.name || p.phone}</p>
+              <p className="text-xs text-gray-500 truncate">{lastMsg?.content || "No messages"}</p>
+            </div>
+          );
+        })}
       </div>
 
-      {/* Chat window */}
-      {selectedId && selectedConv ? (
-        <ChatWindow
-          conversationId={selectedId}
-          patientName={selectedConv.patient.name || selectedConv.patient.phone}
-          patientPhone={selectedConv.patient.phone}
-          status={selectedConv.status}
-          messages={messages}
-          onSendMessage={handleSendMessage}
-          onTakeover={handleTakeover}
-          onHandbackToAI={handleHandbackToAI}
-          onBack={() => setSelectedId(null)}
-        />
-      ) : (
-        <div className="hidden md:flex flex-1 items-center justify-center bg-gray-50">
-          <div className="text-center text-gray-400">
-            <MessageSquare className="h-12 w-12 mx-auto mb-3" />
-            <p className="text-lg font-medium">Select a conversation</p>
-            <p className="text-sm">Choose a patient from the left to view their chat</p>
-          </div>
-        </div>
-      )}
+      {/* Chat Area */}
+      <div className={`${!selectedId ? "hidden md:flex" : "flex"} flex-1 flex-col border rounded-lg bg-white`}>
+        {!selectedId ? (
+          <div className="flex-1 flex items-center justify-center text-gray-400">Select a patient to start chatting</div>
+        ) : (
+          <>
+            <div className="p-3 border-b flex items-center gap-3">
+              <Button variant="ghost" size="sm" className="md:hidden" onClick={() => setSelectedId(null)}><ArrowLeft className="w-4 h-4" /></Button>
+              <div>
+                <p className="font-semibold">{selectedPatient?.name || "Unknown"}</p>
+                <p className="text-xs text-gray-500">{selectedPatient?.phone}</p>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-2 bg-gray-50">
+              {messages.map((m) => (
+                <div key={m.id} className={`flex ${m.direction === "OUTBOUND" ? "justify-end" : "justify-start"}`}>
+                  <div className={`max-w-[75%] p-3 rounded-lg text-sm ${m.direction === "OUTBOUND" ? m.sender === "AI" ? "bg-blue-100 text-blue-900" : "bg-green-100 text-green-900" : "bg-white border"}`}>
+                    <p className="text-xs mb-1 opacity-60">{m.sender} • {new Date(m.createdAt).toLocaleTimeString()}</p>
+                    <p className="whitespace-pre-wrap">{m.content}</p>
+                  </div>
+                </div>
+              ))}
+              <div ref={bottomRef} />
+            </div>
+
+            <div className="p-3 border-t flex gap-2">
+              <Input placeholder="Type a message..." value={input} onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendMessage()} disabled={sending} />
+              <Button variant="whatsapp" onClick={sendMessage} disabled={sending || !input.trim()}>
+                <Send className="w-4 h-4" />
+              </Button>
+              <Button variant="outline" onClick={sendAiReply} disabled={sending} title="Generate AI reply">
+                <Bot className="w-4 h-4" />
+              </Button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
